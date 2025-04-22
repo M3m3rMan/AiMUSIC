@@ -4,10 +4,9 @@ import ffmpeg from 'fluent-ffmpeg';
 import { v4 as uuidv4 } from 'uuid';
 import { HfInference } from '@huggingface/inference';
 import fs from 'fs';
-const hf = new HfInference("HUGGINGFACE_API_KEY");
+const hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
 import { existsSync, createReadStream } from 'fs';
 import fetch from 'node-fetch';
-const HF_API_TOKEN = 'HUGGINGFACE_API_KEY';
 
 export async function extractFeatures(filePath) {
   if (!fs.existsSync(filePath)) {

@@ -1,493 +1,523 @@
-import React, { useState, useRef, useEffect } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Platform, KeyboardAvoidingView, KeyboardEvent, TouchableWithoutFeedback, Keyboard, } from "react-native";
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
-import { Audio } from "expo-av";
-import axios from "axios";
-import { Ionicons } from "@expo/vector-icons";
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, StyleSheet, Modal } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import { Audio } from 'expo-av';
+import axios from 'axios';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { SafeAreaProvider, useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { v4 as uuidv4 } from 'uuid';
-import Markdown from "react-native-markdown-display";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import 'react-native-gesture-handler';
-import { Swipeable } from 'react-native-gesture-handler';
+import Sidebar from './Sidebar';
+import 'react-native-get-random-values';
 
-export default function App() {
+interface Chat {
+  _id: string;
+  name: string;
+  createdAt: string;
+  formattedTime?: string;
+}
+
+interface Message {
+  _id: string;
+  role: string;
+  text: string;
+  audio?: string;
+  audioId?: string;
+  createdAt?: string;
+}
+
+const formatChatTime = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+};
+
+const App = () => {
   const [selectedAudio, setSelectedAudio] = useState<string | null>(null);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<
-    {
-      role: string;
-      text: string;
-      audio?: string | null;
-      audioId?: string;
-      expanded?: boolean;
-      _id?: string; // Added _id property
-    }[]
-  >([]);
-  const BACKEND_URL = 'http://IPADRESS:3001'; // or your actual backend URL
-  const [currentAudioId, setCurrentAudioId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isSending, setIsSending] = useState(false);
+  const [isAIResponding, setIsAIResponding] = useState(false);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isKeyboardVisible, setKeyboardVisible] = useState(false); // NEW
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(false);
+
+  const BACKEND_URL = 'http://192.168.1.212:3001';
   const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
-  const [chats, setChats] = useState<{ _id: string; name: string }[]>([]);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const loadChat = async (chatId: string) => {
-    try {
-      const response = await axios.get(`${BACKEND_URL}/chat/${chatId}`);
-      setMessages(response.data.messages);
-      setCurrentChatId(chatId);
-    } catch (err) {
-      console.error("Failed to load chat:", err);
-    }
-  };
-  const startNewChat = async () => {
-    try {
-      const response = await axios.post(`${BACKEND_URL}/chat`);
-      const newChat = response.data;
-      setCurrentChatId(newChat._id);
+
+  // Load all chats when component mounts
+  useEffect(() => {
+    loadChats();
+  }, []);
+
+  // Load messages when current chat changes
+  useEffect(() => {
+    if (currentChatId) {
+      loadMessages(currentChatId);
+    } else {
       setMessages([]);
-      setChats((prev) => [newChat, ...prev]);  // Add new chat to the top of the list
-    } catch (err) {
-      console.error("Failed to start new chat:", err);
+      setSelectedAudio(null);
     }
-  };
+  }, [currentChatId]);
 
-  
-    
-
-  const preprocessMarkdown = (text: string) => {
-  // Ensure there is a blank line before the list
-  return text.replace(/([^\n])\n(1\.)/g, '$1\n\n$2');
-};
-    useEffect(() => {
-      const loadChatHistory = async () => {
-        try {
-          const res = await axios.get("http://IPADRESS:3001/api/getAllChats");
-          setChats(res.data);
-        } catch (error) {
-          console.error("Failed to load chat history:", error);
-        }
-      };
-  loadChatHistory();
-  }, []);
-  
-
-  // Keyboard visibility listeners
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      "keyboardDidShow",
-      () => {
-        setKeyboardVisible(true);
-      }
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      "keyboardDidHide",
-      () => {
-        setKeyboardVisible(false);
-      }
-    );
-
-    return () => {
-      keyboardDidShowListener.remove();
-      keyboardDidHideListener.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (sound) {
-      return () => {
-        sound.unloadAsync();
-      };
+    if (messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
-  }, [sound]);
+  }, [messages]);
 
-  const generateAudioId = () => Date.now().toString();
-
-  const handleSelectAudio = async () => {
-    const file = await DocumentPicker.getDocumentAsync({ type: "audio/*" });
-    if (file.assets && file.assets.length > 0) {
-      const audioUri = file.assets[0].uri;
-      const newAudioId = generateAudioId();
-      setSelectedAudio(audioUri);
-      setCurrentAudioId(newAudioId);
-      if (selectedAudio) {
-        setMessages(prev => [
-          ...prev,
-          {
-            _id: uuid(),
-            role: "user", // Added role to match the expected type
-            text: "", // Added text to match the expected type
-            audio: selectedAudio, // Use selectedAudio directly as it's a string
-            audioId: generateAudioId(), // Ensure audioId is included
-            expanded: false, // Optional: default value for expanded
-          }
-        ]);
-      }
-      
-    }
-  };
-
-  const handleEditMessage = async (messageId: string, newText: string) => {
+  const loadChats = async () => {
     try {
-      await axios.put(`http://IPADRESS:3001/chats/${messageId}`, { text: newText });
-      setMessages((prev) =>
-        prev.map((msg) => (msg._id === messageId ? { ...msg, text: newText } : msg))
-      );
+      const res = await axios.get(`${BACKEND_URL}/chats/getAllChats`);
+      const chatsWithTimes = res.data.map((chat: Chat) => ({
+        ...chat,
+        formattedTime: formatChatTime(chat.createdAt)
+      }));
+      setChats(chatsWithTimes);
     } catch (err) {
-      console.error("Failed to update message", err);
+      console.error('Failed to load chats:', err);
     }
+  };
+
+  const loadMessages = async (chatId: string) => {
+    try {
+      const res = await axios.get(`${BACKEND_URL}/chats/${chatId}/messages`);
+      setMessages(res.data);
+      const firstUserMessage = res.data.find((msg: Message) => msg.role === 'user' && msg.audio);
+      if (firstUserMessage) {
+        setSelectedAudio(firstUserMessage.audio);
+      }
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+    }
+  };
+
+  const handleNewChat = async () => {
+    try {
+      const now = new Date();
+      const timeString = formatChatTime(now.toString());
+      
+      const res = await axios.post(`${BACKEND_URL}/chats/create`, {
+        name: `Chat at ${timeString}`,
+      });
+      
+      const chatWithTime = {
+        ...res.data,
+        formattedTime: timeString
+      };
+      
+      setCurrentChatId(chatWithTime._id);
+      setMessages([]);
+      setSelectedAudio(null);
+      setChats(prev => [chatWithTime, ...prev]);
+      setIsSidebarVisible(false);
+    } catch (err) {
+      console.error('Error creating chat:', err);
+    }
+  };
+
+  const handleSelectChat = (chatId: string) => {
+    setCurrentChatId(chatId);
+    setIsSidebarVisible(false);
   };
 
   const handleDeleteChat = async (chatId: string) => {
     try {
-      await axios.delete(`${BACKEND_URL}/chat/${chatId}`);
-      setChats((prev) => prev.filter((chat) => chat._id !== chatId));  // Remove deleted chat from state
+      await axios.delete(`${BACKEND_URL}/chats/${chatId}`);
+      setChats(prev => prev.filter(chat => chat._id !== chatId));
+      if (currentChatId === chatId) {
+        setCurrentChatId(null);
+      }
     } catch (err) {
-      console.error("Delete failed:", err);
+      console.error('Delete failed:', err);
     }
   };
-  
-  
+
+  const handleSelectAudio = async () => {
+    try {
+      setSelectedAudio(null);
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'audio/*',
+        copyToCacheDirectory: true,
+        multiple: false
+      });
+
+      if (result.canceled) return;
+      if (!result.assets || result.assets.length === 0) return;
+
+      const audioFile = result.assets[0];
+      const fileInfo = await FileSystem.getInfoAsync(audioFile.uri);
+      if (!fileInfo.exists) throw new Error('File does not exist');
+
+      setSelectedAudio(audioFile.uri);
+
+      if (currentChatId) {
+        const audioMessage = {
+          role: 'user',
+          text: 'Audio file uploaded',
+          audio: audioFile.uri,
+          audioId: uuidv4()
+        };
+
+        const res = await axios.post(
+          `${BACKEND_URL}/chats/${currentChatId}/messages`,
+          audioMessage
+        );
+        setMessages(prev => [...prev, res.data]);
+      }
+    } catch (error) {
+      console.error('Audio selection error:', error);
+      alert(`Failed to select audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
 
   const handleSend = async () => {
-    if (!input || !selectedAudio || !currentAudioId) return;
-    setLoading(true);
-  
+    if (!input || !selectedAudio || !currentChatId) return;
+    
+    setIsSending(true);
     const userMessage = {
-      role: "user",
+      role: 'user',
       text: input,
       audio: selectedAudio,
-      audioId: currentAudioId,
     };
-    
-    setMessages((prev) => [...prev, userMessage]);    
-  
-    
-    setInput("");
-  
+
     try {
-      const fileInfo = await FileSystem.getInfoAsync(selectedAudio);
-      if (!fileInfo.exists) {
-        alert("File does not exist");
-        return;
-      }
-  
+      // Save user message immediately
+      const userRes = await axios.post(
+        `${BACKEND_URL}/chats/${currentChatId}/messages`,
+        userMessage
+      );
+      setMessages(prev => [...prev, userRes.data]);
+      setInput('');
+      
+      // Show loading state for AI response
+      setIsAIResponding(true);
+
+      // Prepare and send audio for analysis
       const formData = new FormData();
-      formData.append("audio", {
+      formData.append('audio', {
         uri: selectedAudio,
-        type: "audio/wav",
-        name: "input.wav",
+        type: 'audio/wav',
+        name: 'input.wav',
       } as any);
-      formData.append("prompt", input);
-  
-      // ✅ 2. Save user message to DB
-      
-      
-      // After getting response:
-      // ✅ 1. Send audio to backend for analysis      
-      const res = await axios.post(
-        "http://IPADRESS:3001/analyze",
+      formData.append('prompt', input);
+
+      const analysisRes = await axios.post(
+        `${BACKEND_URL}/analyze`,
         formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
+        { headers: { 'Content-Type': 'multipart/form-data' } }
       );
 
-      await axios.post("http://IPADRESS:3001/chats", {
-        role: "assistant",
-        text: res.data.suggestions,
-        audio: selectedAudio,
-        audioId: currentAudioId,
-      });
-  
+      // Save and display AI response
       const assistantMessage = {
-        role: "assistant",
-        text: res.data.suggestions,
-        audio: selectedAudio,
-        audioId: currentAudioId,
+        role: 'assistant',
+        text: analysisRes.data.suggestions,
       };
-  
-      // ✅ 4. Add assistant message to UI
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (err) {
-      console.error("Error during analysis:", err);
-      const errorMsg = {
-        role: "assistant",
-        text: "Error analyzing audio.",
-        audioId: currentAudioId,
+      const assistantRes = await axios.post(
+        `${BACKEND_URL}/chats/${currentChatId}/messages`,
+        assistantMessage
+      );
+      setMessages(prev => [...prev, assistantRes.data]);
+    } catch (error) {
+      console.error('Error:', error);
+      const errorMessage: Message = {
+        _id: uuidv4(),
+        role: 'assistant',
+        text: 'Sorry, I encountered an error processing your request.',
       };
-      await axios.post("http://IPADRESS:3001/chats", userMessage); // Save user message
-
-      setMessages((prev) => [...prev, userMessage]); // Local state update
-      // ✅ 5. Optionally save error to DB
-      await axios.post("http://IPADRESS:3001/messages", errorMsg);
-
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
-      setLoading(false);
+      setIsSending(false);
+      setIsAIResponding(false);
     }
   };
-  
 
   const togglePlay = async (uri: string) => {
-    if (sound) {
-      await sound.unloadAsync();
-      setSound(null);
-      setIsPlaying(false);
-    }
-  
-    const { sound: newSound } = await Audio.Sound.createAsync({ uri });
-    setSound(newSound);
-    await newSound.playAsync();
-    setIsPlaying(true);
-  
-    newSound.setOnPlaybackStatusUpdate((status) => {
-      if ('isPlaying' in status && !status.isPlaying) {
-        setIsPlaying(false);
+    if (!uri) return;
+    
+    try {
+      if (sound) {
+        if (isPlaying) {
+          await sound.pauseAsync();
+          setIsPlaying(false);
+        } else {
+          await sound.playAsync();
+          setIsPlaying(true);
+        }
+      } else {
+        const { sound: newSound } = await Audio.Sound.createAsync({ uri });
+        setSound(newSound);
+        await newSound.playAsync();
+        setIsPlaying(true);
+        
+        newSound.setOnPlaybackStatusUpdate(status => {
+          if ('isPlaying' in status && !status.isPlaying) {
+            setIsPlaying(false);
+          }
+        });
       }
-    });
+    } catch (error) {
+      console.error('Playback error:', error);
+    }
   };
-  
 
-  const renderItem = ({ item, index }: { item: any; index: number }) => {
-    const isFirstMsgOfAudio =
-      messages.findIndex((m) => m.audioId === item.audioId) === index;
-    const isUser = item.role === "user";
-    console.log("RAW MODEL RESPONSE:", item.text);
+  const renderItem = ({ item, index }: { item: Message; index: number }) => {
+    const isUser = item.role === 'user';
+    const isLastMessage = index === messages.length - 1;
+    const isFirstWithAudio = messages.findIndex(m => m.audio === item.audio) === index;
 
-    console.log('Rendering item:', item);
     return (
-      <View
-        style={{
-          marginBottom: 1,
-          alignSelf: item.role === "user" ? "flex-end" : "flex-start",
-          maxWidth: "80%",
-        }}
-      >
-        <Swipeable
-        renderRightActions={() => (
-          <TouchableOpacity onPress={() => handleDeleteChat(item._id)} style={{ backgroundColor: 'red', justifyContent: 'center', alignItems: 'center', flex: 1 }}>
-            <Text style={{ color: 'white', padding: 20 }}>Delete</Text>
-          </TouchableOpacity>
-        )}
-      > <TouchableOpacity onPress={() => loadChat(item._id)}>
-      <View style={{ padding: 15, borderBottomWidth: 1, borderColor: '#ccc' }}>
-      <Text>{item.name || `Chat ${item._id?.slice(-4) || "XXXX"}`}</Text>
-      </View>
-        </TouchableOpacity>
-    </Swipeable>
-        <TouchableOpacity onLongPress={() => handleDeleteChat(item._id)}>
-        {/* existing message bubble */}
-      </TouchableOpacity>
-        {item.audio && isFirstMsgOfAudio && (
-          <View
-            style={{
-              padding: 12,
-              backgroundColor: "white",
-              borderRadius: 16,
-              shadowColor: "#000",
-              shadowOpacity: 0.1,
-              shadowRadius: 6,
-              marginBottom: 4,
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 16,
-                fontWeight: "bold",
-                color: "black",
-                marginBottom: 6,
-              }}
-            >
-              🎵 Audio Preview
+      <View style={{ marginBottom: 10, alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+        {/* Audio player for user messages */}
+        {isUser && isFirstWithAudio && item.audio && (
+          <View style={styles.audioContainer}>
+            <Text style={styles.audioFilename} numberOfLines={1}>
+              {item.audio.split('/').pop()}
             </Text>
-            <Text
-              numberOfLines={1}
-              style={{ color: "gray", fontSize: 14, marginBottom: 6 }}
-            >
-              {item.audio.split("/").pop()}
-            </Text>
-            <TouchableOpacity
-            onPress={() => togglePlay(item.audio)}
-              style={{
-                backgroundColor: "#2563eb",
-                paddingHorizontal: 16,
-                paddingVertical: 8,
-                borderRadius: 12,
-              }}
-            >
-              <Text style={{ color: "white", fontWeight: "bold" }}>
-                {isPlaying ? "Pause" : "Play"}
-              </Text>
+            <TouchableOpacity onPress={() => togglePlay(item.audio!)}>
+              <Ionicons 
+                name={isPlaying ? 'pause' : 'play'} 
+                size={24} 
+                color="#2563eb" 
+              />
             </TouchableOpacity>
           </View>
         )}
 
-        {!isFirstMsgOfAudio && item.expanded && item.audio && (
-          <View
-            style={{
-              padding: 12,
-              backgroundColor: "white",
-              borderRadius: 12,
-              marginBottom: 4,
-            }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: "600" }}>
-              🎧 {item.audio.split("/").pop()}
-            </Text>
-            <TouchableOpacity
-              onPress={() => togglePlay(item.audio)} // corrected to use 'item.audio'
-                style={{
-                marginTop: 6,
-                backgroundColor: "#2563eb",
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                borderRadius: 12,
-              }}
-            >
-              <Text style={{ color: "white", fontWeight: "bold" }}>
-                {isPlaying ? "Pause" : "Play"}
-              </Text>
-            </TouchableOpacity>
+        {/* Loading indicator for pending AI responses */}
+        {!isUser && isAIResponding && isLastMessage && (
+          <View style={styles.loadingBubble}>
+            <ActivityIndicator size="small" color="#2563eb" />
+            <Text style={styles.loadingText}>AI is thinking...</Text>
           </View>
         )}
 
-          {loading && (
-  <ActivityIndicator size="large" color="#2563eb" style={{ margin: 16 }} />
-          )}
-
-{chats.map((chat) => (
-  <Text key={chat._id}>{chat.name || `Chat ${chat._id.slice(-4)}`}</Text>
-))}
-<TouchableOpacity onPress={startNewChat}>
-  <Text style={{ color: "blue" }}>+ New Chat</Text>
-</TouchableOpacity>
-  
-
-        <View
-          style={{
-            backgroundColor: isUser ? "#2563eb" : "#e5e7eb",
-            padding: 12,
-            borderRadius: 16,
-            width: "100%",
-          }}
-        >
-          {isUser ? (
-  <Text style={{ color: "white" }}>{item.text}</Text>
-) : (
-<Text>{item.text}</Text>
-
-            // <Markdown
-            //   style={{
-            //     body: { color: 'black' },
-            //     bullet_list: { marginLeft: 8 },
-            //     ordered_list: { marginLeft: 8 },
-            //     list_item: { marginBottom: 4 },
-            //     paragraph: { marginBottom: 8 },
-            //     code_block: { backgroundColor: '#f4f4f5', padding: 8, borderRadius: 8, fontFamily: 'Courier' },
-            //   }}
-            // >
-            //   {testMarkdown}
-            // </Markdown>
-          )}
+        {/* Message bubble */}
+        <View style={[
+          styles.messageContainer,
+          isUser ? styles.userMessage : styles.assistantMessage,
+          isAIResponding && !isUser && isLastMessage && { opacity: 0.5 }
+        ]}>
+          <Text style={[
+            styles.messageText,
+            isUser ? styles.userMessageText : styles.assistantMessageText
+          ]}>
+            {item.text}
+          </Text>
         </View>
       </View>
     );
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: 'white' }}>
       <SafeAreaProvider>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={{ flex: 1 }}
-        >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View
-              style={{
-                flex: 1,
-                justifyContent: "space-between",
-                paddingTop: insets.top,
-                paddingBottom: isKeyboardVisible ? 0 : 20,
-                paddingHorizontal: 15,
-                backgroundColor: "white",
-              }}
-            >
-              <FlatList
-                ref={flatListRef}
-                data={messages}
-                renderItem={renderItem}
-                keyExtractor={(item, index) => item._id || index.toString()}
-              />
-              {loading && (
-                <ActivityIndicator
-                  style={{ marginVertical: 12 }}
-                  size="large"
-                  color="#2563eb"
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+          {/* Sidebar */}
+          <Sidebar
+            isVisible={isSidebarVisible}
+            chats={chats}
+            onSelectChat={handleSelectChat}
+            onCreateNewChat={handleNewChat}
+            onDeleteChat={handleDeleteChat}
+            onClose={() => setIsSidebarVisible(false)}
+          />
+
+          {/* Main Content */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ flex: 1 }}
+          >
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <View style={{ flex: 1 }}>
+                {/* Header */}
+                <View style={styles.header}>
+                  <TouchableOpacity onPress={() => setIsSidebarVisible(true)}>
+                    <Ionicons name="menu" size={28} color="#2563eb" />
+                  </TouchableOpacity>
+                  <View style={styles.headerTitleContainer}>
+                    <Text style={styles.headerTitle}>
+                      {currentChatId ? (
+                        chats.find(c => c._id === currentChatId)?.name || 'Chat'
+                      ) : 'New Chat'}
+                    </Text>
+                    {currentChatId && (
+                      <Text style={styles.timeText}>
+                        {chats.find(c => c._id === currentChatId)?.formattedTime || ''}
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity onPress={handleNewChat}>
+                    <Ionicons name="add-circle" size={28} color="#2563eb" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Messages List */}
+                <FlatList
+                  ref={flatListRef}
+                  data={messages}
+                  renderItem={renderItem}
+                  keyExtractor={(item) => item._id}
+                  contentContainerStyle={styles.messagesContainer}
+                  style={{ backgroundColor: 'white' }}
                 />
-              )}
-  
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  padding: 12,
-                  borderTopWidth: isKeyboardVisible ? 0 : 1,
-                  borderColor: "#e5e7eb",
-                  backgroundColor: "white",
-                }}
-              >
-                <TouchableOpacity
-                  onPress={handleSelectAudio}
-                  style={{ marginRight: 12 }}
-                >
-                  <Ionicons name="add-circle-outline" size={32} color="#2563eb" />
-                </TouchableOpacity>
-  
-                <TextInput
-                  value={input}
-                  onChangeText={setInput}
-                  placeholder="Ask something about your track..."
-                  style={{
-                    flex: 1,
-                    borderWidth: 1,
-                    borderColor: "#e5e7eb",
-                    borderRadius: 24,
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                    backgroundColor: "#fff",
-                  }}
-                />
-  
-                <TouchableOpacity
-                  onPress={handleSend}
-                  disabled={!selectedAudio || loading || !input.trim()}
-                  style={{ marginLeft: 12 }}
-                >
-                  <Ionicons
-                    name="arrow-up-circle"
-                    size={32}
-                    color={selectedAudio && input.trim() ? "#2563eb" : "#9ca3af"}
+
+                {/* Input Area */}
+                <View style={styles.inputContainer}>
+                  <TouchableOpacity 
+                    onPress={handleSelectAudio}
+                    disabled={!currentChatId || isSending}
+                    style={styles.attachButton}
+                  >
+                    <Ionicons
+                      name="attach"
+                      size={28}
+                      color={currentChatId && !isSending ? '#2563eb' : '#ccc'}
+                    />
+                  </TouchableOpacity>
+                  
+                  <TextInput
+                    value={input}
+                    onChangeText={setInput}
+                    placeholder={currentChatId ? "Ask about your track..." : "Create or select a chat"}
+                    style={styles.input}
+                    editable={!!currentChatId}  // Removed the !isSending check
+                    placeholderTextColor="#9ca3af"
                   />
-                </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    onPress={handleSend}
+                    disabled={!input || !currentChatId || isSending}  // Keep isSending check here
+                    style={styles.sendButton}
+                  >
+                    {isSending ? (
+                      <ActivityIndicator size="small" color="#2563eb" />
+                    ) : (
+                      <Ionicons
+                        name="send"
+                        size={24}
+                        color={input && currentChatId ? '#2563eb' : '#ccc'}
+                      />
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
-}
-function handleDeleteChat(_id: any): void {
-  throw new Error("Function not implemented.");
-}
+};
 
-function uuid(): string | undefined {
-  throw new Error("Function not implemented.");
-}
+const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: 'white',
+  },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 10,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2563eb',
+    textAlign: 'center',
+  },
+  timeText: {
+    fontSize: 14,
+    fontWeight: 'normal',
+    color: '#6b7280',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  messagesContainer: {
+    paddingHorizontal: 15,
+    paddingBottom: 15,
+    paddingTop: 10,
+  },
+  audioContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: '#f0f4ff',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  audioFilename: {
+    flex: 1,
+    marginRight: 10,
+    color: '#2563eb',
+  },
+  messageContainer: {
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  userMessage: {
+    backgroundColor: '#2563eb',
+  },
+  assistantMessage: {
+    backgroundColor: '#e5e7eb',
+  },
+  messageText: {
+    fontSize: 16,
+  },
+  userMessageText: {
+    color: 'white',
+  },
+  assistantMessageText: {
+    color: 'black',
+  },
+  loadingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#e5e7eb',
+    marginBottom: 8,
+  },
+  loadingText: {
+    marginLeft: 8,
+    color: '#6b7280',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderTopWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: 'white',
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: '#f9fafb',
+  },
+  attachButton: {
+    padding: 8,
+    marginRight: 10,
+  },
+  sendButton: {
+    marginLeft: 10,
+  },
+});
 
+export default App;
