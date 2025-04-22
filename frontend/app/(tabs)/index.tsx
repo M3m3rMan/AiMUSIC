@@ -44,7 +44,7 @@ const App = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(false);
 
-  const BACKEND_URL = 'http://192.168.1.212:3001';
+  const BACKEND_URL = 'http:/IPADRESS:3001';
   const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
 
