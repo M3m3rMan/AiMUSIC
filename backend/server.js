@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import cors from 'cors';
-import { extractFeatures, buildImprovementPrompt } from './featureExtractor.js';
+import { extractFeatures, buildImprovementPrompt, generateSuggestions } from './featureExtractor.js';
 import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -14,9 +14,12 @@ import { convertToWav } from './convertAudio.js';
 import { classifyPrompt } from './nlp.js';
 import OpenAI from 'openai';
 import { ObjectId } from 'mongodb';
+import mongodb from 'mongodb';
 dotenv.config();
 import { MongoClient, ServerApiVersion } from 'mongodb';
 import bodyParser from 'body-parser';
+import { classifyAudio } from './modelLoader.js';
+
 
 const uri = process.env.MONGODB_URI;
 const app = express();
@@ -43,6 +46,18 @@ async function connectToMongo() {
   }
   return dbInstance;
 }
+
+let classifier;
+async function initializeModel() {
+  try {
+    classifier = await classifyAudio; // Gets singleton instance
+    console.log('Audio model loaded successfully');
+  } catch (err) {
+    console.error('Failed to load model:', err);
+    process.exit(1);
+  }
+}
+initializeModel();
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -74,18 +89,15 @@ const convertAudio = (inputPath) => {
 // Routes
 app.post('/analyze', upload.single('audio'), async (req, res) => {
   try {
-    const originalPath = req.file.path;
-    const wavPath = path.join('uploads', `${Date.now()}-converted.wav`);
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file uploaded' });
+    }
 
-    console.log('Original file path:', originalPath);
-    console.log('WAV file path:', wavPath);
-
-    await convertToWav(originalPath, wavPath);
-    console.log('File converted to WAV at:', wavPath);
-
-    const genreResults = await extractFeatures(wavPath);
-    const userPrompt = req.body.prompt;
-
+    // 1. Extract features using Transformers.js
+    const genreResults = await extractFeatures(req.file.path);
+    
+    // 2. Generate prompt (optional user prompt from frontend)
+    const userPrompt = req.body.prompt || "";
     const prompt = buildImprovementPrompt(genreResults, userPrompt);
 
     const completion = await openai.chat.completions.create({
@@ -93,7 +105,7 @@ app.post('/analyze', upload.single('audio'), async (req, res) => {
       messages: [
         {
           role: 'system',
-          content: `You are a helpful music production assistant. Based on features like genre, tempo, and user prompts, give detailed, creative, and actionable suggestions (3 to 5 items) to improve tracks. Be specific about techniques, tools, effects, and structure improvements.`,
+          content: `You are a helpful music production assistant. Based on features like genre, tempo, and user prompts, give detailed, creative, and actionable suggestions (1 to 3 items) to improve tracks. Be specific about techniques, tools, effects, and structure improvements.`,
         },
         {
           role: 'user',
@@ -105,15 +117,40 @@ app.post('/analyze', upload.single('audio'), async (req, res) => {
     });
 
     const suggestions = completion.choices[0].message.content;
-    await fs.unlink(wavPath).catch(console.error);
-    console.log('Deleted temporary WAV file:', wavPath);
+
+    
+    // await fs.unlink(wavPath).catch(console.error);
 
     res.json({ genre: genreResults, suggestions });
+    // await fs.unlink(req.file.path);
+
+    // res.json({
+    //   success: true,
+    //   genres: genreResults,
+    //   prompt: prompt, // You can generate suggestions client-side or add another endpoint
+    //   timestamp: new Date().toISOString()
+    // });
+
   } catch (err) {
-    console.error('Error during analysis:', err);
-    res.status(500).json({ error: err.message });
-  } 
+    console.error('Analysis error:', err);
+    
+    // Clean up file if it exists
+    if (req.file?.path) {
+      await fs.unlink(req.file.path).catch(console.error);
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Audio analysis failed',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
 });
+
+
+app.get('/', (req, res) => {
+  res.send('Welcome to the Audio Analysis Server!');
+},);
 
 // Chat CRUD Operations
 app.post('/chats/create', async (req, res) => {
