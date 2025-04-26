@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Sidebar from './Sidebar';
 import 'react-native-get-random-values';
+import Markdown from 'react-native-markdown-display';
 
 interface Chat {
   _id: string;
@@ -32,6 +33,11 @@ const formatChatTime = (dateString: string) => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 };
 
+function formatTextWithTitle(text: string): string {
+  return `Here's how you can improve your track:\n\n${text}`;
+}
+
+
 const App = () => {
   const [selectedAudio, setSelectedAudio] = useState<string | null>(null);
   const [input, setInput] = useState('');
@@ -44,7 +50,7 @@ const App = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(false);
 
-  const BACKEND_URL = 'http:/IPADRESS:3001';
+  const BACKEND_URL = 'http://IPDRESS CHANGE THIS FIRST GODDAMN IT:3001';
   const flatListRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
 
@@ -88,13 +94,14 @@ const App = () => {
   const loadMessages = async (chatId: string) => {
     try {
       const res = await axios.get(`${BACKEND_URL}/chats/${chatId}/messages`);
-      setMessages(res.data);
-      const firstUserMessage = res.data.find((msg: Message) => msg.role === 'user' && msg.audio);
+      setMessages(res.data || []); // Ensure it's always an array
+      const firstUserMessage = res.data?.find((msg: Message) => msg.role === 'user' && msg.audio);
       if (firstUserMessage) {
         setSelectedAudio(firstUserMessage.audio);
       }
     } catch (err) {
       console.error('Failed to load messages:', err);
+      setMessages([]); // Reset to empty array on error
     }
   };
 
@@ -266,6 +273,9 @@ const App = () => {
       console.error('Playback error:', error);
     }
   };
+  
+
+
 
   const renderItem = ({ item, index }: { item: Message; index: number }) => {
     const isUser = item.role === 'user';
@@ -299,17 +309,19 @@ const App = () => {
         )}
 
         {/* Message bubble */}
-        <View style={[
-          styles.messageContainer,
-          isUser ? styles.userMessage : styles.assistantMessage,
-          isAIResponding && !isUser && isLastMessage && { opacity: 0.5 }
-        ]}>
-          <Text style={[
-            styles.messageText,
-            isUser ? styles.userMessageText : styles.assistantMessageText
-          ]}>
-            {item.text}
-          </Text>
+        <View
+          style={[
+            styles.messageBubble,
+            { backgroundColor: isUser ? '#2563eb' : '#e5e7eb', alignSelf: isUser ? 'flex-end' : 'flex-start' }
+          ]}
+        >
+          {isUser ? (
+            <Text style={{ color: '#fff' }}>{item.text}</Text>
+          ) : (
+            <Markdown style={markdownStyles}>
+              {formatTextWithTitle(item.text)}
+            </Markdown>
+          )}
         </View>
       </View>
     );
@@ -416,6 +428,33 @@ const App = () => {
   );
 };
 
+const markdownStyles: StyleSheet.NamedStyles<any> = {
+  body: {
+    color: '#111827',
+    fontSize: 16,
+  },
+  code_block: {
+    backgroundColor: '#f3f4f6',
+    padding: 10,
+    borderRadius: 8,
+    fontFamily: Platform.select({ ios: 'Courier', android: 'monospace' }),
+  },
+  inlineCode: {
+    backgroundColor: '#f3f4f6',
+    padding: 4,
+    borderRadius: 4,
+    fontFamily: Platform.select({ ios: 'Courier', android: 'monospace' }),
+  },
+  strong: {
+    fontWeight: 'bold' as 'bold',
+  },
+  em: {
+    fontStyle: 'italic',
+  },
+};
+
+
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -425,6 +464,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: '#e5e7eb',
     backgroundColor: 'white',
+    flexWrap: 'wrap',
+  },
+  messageBubble: {
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+    maxWidth: '95%',
+    flexDirection: 'row',
+    overflow: 'hidden',
   },
   headerTitleContainer: {
     flex: 1,
@@ -475,6 +523,10 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 16,
+    color: '#111827',
+    flexWrap: 'wrap',
+    overflow: 'hidden',
+    maxWidth: '100%',
   },
   userMessageText: {
     color: 'white',
