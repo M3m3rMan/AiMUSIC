@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Chat {
   _id: string;
@@ -28,6 +29,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   if (!isVisible) return null;
 
+  const insets = useSafeAreaInsets();
+
   const renderRightActions = (progress: any, dragX: any, chatId: string) => {
     const scale = dragX.interpolate({
       inputRange: [-100, 0],
@@ -45,10 +48,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: 20 + insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Your Chats</Text>
-        <TouchableOpacity onPress={onClose}>
+        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Ionicons name="close" size={24} color="#2563eb" />
         </TouchableOpacity>
       </View>
@@ -93,8 +96,9 @@ const styles = StyleSheet.create({
         top: 0,
         bottom: 0,
         width: '80%',
-        backgroundColor: 'white', // Ensure white background
+        backgroundColor: 'white',
         padding: 20,
+        paddingTop: 20, // Default padding, will be adjusted dynamically
         zIndex: 100,
         borderRightWidth: 1,
         borderRightColor: '#e5e7eb',
@@ -103,58 +107,66 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 4,
         elevation: 5,
-      },
+    },
+    closeButton: {
+        padding: 8, // Makes it easier to tap
+    },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2563eb',
-  },
-  newChatButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#f0f4ff',
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  newChatText: {
-    marginLeft: 10,
-    color: '#2563eb',
-    fontWeight: '500',
-  },
-  chatList: {
-    flex: 1,
-  },
-  chatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  chatName: {
-    flex: 1,
-    marginLeft: 10,
-    color: '#1f2937',
-  },
-  chatDate: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  deleteButton: {
-    backgroundColor: 'red',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    height: '100%',
-  },
+    },
+    title: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#2563eb',
+    },
+    newChatButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        backgroundColor: '#f0f4ff',
+        borderRadius: 8,
+        marginBottom: 20,
+    },
+    newChatText: {
+        marginLeft: 10,
+        color: '#2563eb',
+        fontWeight: '500',
+    },
+    chatList: {
+        flex: 1,
+    },
+    chatItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e5e7eb',
+    },
+    chatName: {
+        flex: 1,
+        marginLeft: 10,
+        color: '#1f2937',
+    },
+    chatDate: {
+        fontSize: 12,
+        color: '#6b7280',
+    },
+    deleteButton: {
+        backgroundColor: 'red',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 80,
+        height: '100%',
+    },
+});
+
+const getContainerStyle = (insets: { top: number }) => ({
+    ...styles.container,
+    paddingTop: 20 + insets.top,
 });
 
 export default Sidebar;
