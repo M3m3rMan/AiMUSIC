@@ -1,98 +1,89 @@
-// featureExtractor.js
+import { HfInference } from '@huggingface/inference';
+import fs from 'fs/promises';
 import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { v4 as uuidv4 } from 'uuid';
-import { HfInference } from '@huggingface/inference';
-import fs from 'fs';
+import { classifyAudio } from './modelLoader.js';
+
 const hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
-import { existsSync, createReadStream } from 'fs';
-import fetch from 'node-fetch';
 
-export async function extractFeatures(filePath) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error('File does not exist');
-  }
-
-  try {
-    const result = await hf.audioClassification({
-      model: 'dima806/music_genres_classification',
-      data: fs.readFileSync(filePath),
-    });
-
-    return result;
-    console.log("Audio classification result:", result);
-  } catch (err) {
-    console.error("HF audio classification failed:", err);
-    throw new Error(`HF API error: ${err.message}`);
-  }
-};
-
-function buildImprovementPrompt(classification, userPrompt) {
-  console.log("Building improvement prompt with classification:", classification);
-  const topGenres = classification
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map(item => `${item.label} (${(item.score * 100).toFixed(1)}%)`)
-    .join(', ');
-
-  return `You are a professional music producer.
-
-This track blends elements of: ${topGenres}.
-
-User's question: "${userPrompt}"
-
-Give 3 specific, technical, and actionable suggestions to improve this track. 
-Avoid restating the question. Be concise and direct.`;
+// Audio conversion helper
+async function convertToWav(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .toFormat('wav')
+      .on('end', () => resolve(outputPath))
+      .on('error', reject)
+      .save(outputPath);
+  });
 }
 
-
-async function generateSuggestion(prompt) {
+export async function extractFeatures(filePath) {
   try {
-    const result = await hf.textGeneration({
-      model: 'HuggingFaceH4/zephyr-7b-beta',
-      inputs: `<|system|>You are a professional music producer. Answer user requests clearly and use bullet points when needed.<|user|>${prompt}<|assistant|>`,
-      parameters: {
-        max_new_tokens: 200,
-        temperature: 0.7,
-        top_p: 0.9,
-        repetition_penalty: 1.1
-      },
-    });
+    // 1. Verify file exists
+    // await fs.access(filePath);
 
-    return extractAssistantReply(result.generated_text);
-    function extractAssistantReply(generatedText) {
-      const parts = generatedText.split('<|assistant|>');
-      return parts[parts.length - 1].trim();
-    }    
+    // // 2. Convert to standard format
+    // const wavPath = path.join(path.dirname(filePath), `${uuidv4()}.wav`);
+    // await new Promise((resolve, reject) => {
+    //   ffmpeg(filePath)
+    //     .audioChannels(1)
+    //     .audioFrequency(16000)
+    //     .toFormat('wav')
+    //     .on('end', () => resolve(wavPath))
+    //     .on('error', reject)
+    //     .save(wavPath);
+    // });
+
+    // 3. Classify audio
+    const results = await classifyAudio(filePath);
+
+    console.log("Classification results:", results);
+
+    // 4. Clean up
+    // await fs.unlink(filePath);
+
+    return results;
+
   } catch (err) {
-    console.error("Text generation failed:", err);
+    console.error("Feature extraction failed:", err);
+    throw new Error(`Audio analysis error: ${err.message}`);
+  }
+}
+
+// Properly exported prompt builder
+export function buildImprovementPrompt(classificationResults) {
+  const topGenres = classificationResults
+    .map(item => `${item.label} (${Math.round(item.score * 100)}%)`)
+    .join(', ');
+
+  return `Analyze this music track with these characteristics and provide the answer in a Markdown format:
+  Primary Genres: ${topGenres}
+
+  Provide 1-3 specific production suggestions focusing on:
+  - Mixing improvements
+  - Sound design enhancements
+  - Arrangement adjustments
+  - Recommended effects processing
+  - Reference tracks for inspiration`;
+}
+
+// Add this if you need direct suggestion generation
+export async function generateSuggestions(prompt) {
+  try {
+    const response = await hf.textGeneration({
+      model: 'mistralai/Mistral-7B-Instruct-v0.1',
+      inputs: prompt,
+      parameters: {
+        max_new_tokens: 500,
+        temperature: 0.7
+      }
+    });
+    return response.generated_text;
+  } catch (err) {
+    console.error("Suggestion generation failed:", err);
     throw err;
   }
 }
-
-
-export { buildImprovementPrompt, generateSuggestion };
-// export async function extractFeatures(audioPath, prompt) {
-//   try {
-//     console.log('Reading file from path:', audioPath);
-//     const audioBuffer = await readFileAsync(audioPath);
-//     console.log('File size:', audioBuffer.length, 'bytes');
-    
-//     // Convert the buffer to a Blob-like object that HuggingFace can process
-//     const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
-    
-//     // Use a different audio classification model that's better suited for general audio analysis
-//     const result = await hf.audioClassification({
-//       model: 'MIT/ast-finetuned-audioset-10-10-0.4593',
-//       data: audioBuffer,
-//     });
-    
-//     return {
-//       classification: result,
-//       suggestions: `Prompt response based on: "${prompt}"`,
-//     };
-//   } catch (err) {
-//     console.error('Analysis error:', err);
-//     throw err;
-//   }
-// }
